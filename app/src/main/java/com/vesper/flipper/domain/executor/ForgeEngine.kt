@@ -1,6 +1,6 @@
 package com.vesper.flipper.domain.executor
 
-import com.vesper.flipper.ai.OpenRouterClient
+import com.vesper.flipper.ai.AiClientRouter
 import com.vesper.flipper.domain.model.*
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -11,7 +11,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class ForgeEngine @Inject constructor(
-    private val openRouterClient: OpenRouterClient
+    private val openRouterClient: AiClientRouter
 ) {
 
     /**

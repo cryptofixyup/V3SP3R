@@ -10,12 +10,54 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class AiProvider { OPENROUTER, CLAUDE }
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "vesper_settings")
 
 @Singleton
 class SettingsStore @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+
+    // AI Provider selection
+    private val AI_PROVIDER = stringPreferencesKey("ai_provider")
+
+    val aiProvider: Flow<AiProvider> = context.dataStore.data.map { preferences ->
+        preferences[AI_PROVIDER]?.let { runCatching { AiProvider.valueOf(it) }.getOrNull() }
+            ?: AiProvider.OPENROUTER
+    }
+
+    suspend fun setAiProvider(provider: AiProvider) {
+        context.dataStore.edit { preferences ->
+            preferences[AI_PROVIDER] = provider.name
+        }
+    }
+
+    // Claude (Anthropic) API Key
+    private val CLAUDE_API_KEY = stringPreferencesKey("claude_api_key")
+
+    val claudeApiKey: Flow<String?> = context.dataStore.data.map { preferences ->
+        preferences[CLAUDE_API_KEY]
+    }
+
+    suspend fun setClaudeApiKey(key: String) {
+        context.dataStore.edit { preferences ->
+            preferences[CLAUDE_API_KEY] = key
+        }
+    }
+
+    // Claude model selection
+    private val CLAUDE_MODEL = stringPreferencesKey("claude_model")
+
+    val claudeModel: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[CLAUDE_MODEL] ?: DEFAULT_CLAUDE_MODEL
+    }
+
+    suspend fun setClaudeModel(model: String) {
+        context.dataStore.edit { preferences ->
+            preferences[CLAUDE_MODEL] = model
+        }
+    }
 
     // OpenRouter API Key
     private val API_KEY = stringPreferencesKey("openrouter_api_key")
@@ -303,6 +345,7 @@ class SettingsStore @Inject constructor(
     companion object {
         // Default to the largest Hermes 4 model on OpenRouter.
         const val DEFAULT_MODEL = "nousresearch/hermes-4-405b"
+        const val DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
         // Shimmer: soft, warm female — default TTS voice (OpenAI via OpenRouter)
         const val DEFAULT_TTS_VOICE = "shimmer"
         const val DEFAULT_AI_MAX_ITERATIONS = 10

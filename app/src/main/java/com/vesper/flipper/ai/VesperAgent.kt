@@ -42,7 +42,7 @@ fun interface PhotoCaptureCallback {
  */
 @Singleton
 class VesperAgent @Inject constructor(
-    private val openRouterClient: OpenRouterClient,
+    private val openRouterClient: AiClientRouter,
     private val commandExecutor: CommandExecutor,
     private val auditService: AuditService,
     private val chatDao: ChatDao,

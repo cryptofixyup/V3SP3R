@@ -23,7 +23,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class PayloadEngine @Inject constructor(
-    private val openRouterClient: OpenRouterClient,
+    private val openRouterClient: AiClientRouter,
     private val flipperFileSystem: FlipperFileSystem
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }

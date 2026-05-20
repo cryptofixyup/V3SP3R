@@ -2,6 +2,8 @@ package com.vesper.flipper.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.vesper.flipper.ai.ClaudeClient
+import com.vesper.flipper.data.AiProvider
 import com.vesper.flipper.data.ModelInfo
 import com.vesper.flipper.data.OpenRouterModelCatalog
 import com.vesper.flipper.data.SettingsStore
@@ -14,8 +16,11 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class SettingsState(
+    val aiProvider: AiProvider = AiProvider.OPENROUTER,
     val apiKey: String = "",
     val selectedModel: String = SettingsStore.DEFAULT_MODEL,
+    val claudeApiKey: String = "",
+    val claudeModel: String = SettingsStore.DEFAULT_CLAUDE_MODEL,
     val aiMaxIterations: Int = SettingsStore.DEFAULT_AI_MAX_ITERATIONS,
     val autoConnect: Boolean = true,
     val defaultProjectPath: String = "/ext/apps_data/vesper",
@@ -64,26 +69,53 @@ class SettingsViewModel @Inject constructor(
     private fun loadSettings() {
         viewModelScope.launch {
             combine(
+                settingsStore.aiProvider,
                 settingsStore.apiKey,
                 settingsStore.selectedModel,
-                settingsStore.aiMaxIterations,
-                settingsStore.autoConnect,
-                settingsStore.defaultProjectPath,
-                settingsStore.permissionDuration,
-                settingsStore.hapticFeedback,
-                settingsStore.darkMode,
-                settingsStore.auditRetentionDays
+                settingsStore.claudeApiKey,
+                settingsStore.claudeModel
             ) { values ->
+                ProviderSettingsBundle(
+                    aiProvider = values[0] as AiProvider,
+                    apiKey = (values[1] as? String) ?: "",
+                    selectedModel = values[2] as String,
+                    claudeApiKey = (values[3] as? String) ?: "",
+                    claudeModel = values[4] as String
+                )
+            }.combine(
+                combine(
+                    settingsStore.aiMaxIterations,
+                    settingsStore.autoConnect,
+                    settingsStore.defaultProjectPath,
+                    settingsStore.permissionDuration,
+                    settingsStore.hapticFeedback,
+                    settingsStore.darkMode,
+                    settingsStore.auditRetentionDays
+                ) { values ->
+                    BaseSettingsBundle(
+                        aiMaxIterations = values[0] as Int,
+                        autoConnect = values[1] as Boolean,
+                        defaultProjectPath = values[2] as String,
+                        permissionDuration = values[3] as Long,
+                        hapticFeedback = values[4] as Boolean,
+                        darkMode = values[5] as Boolean,
+                        auditRetentionDays = values[6] as Int
+                    )
+                }
+            ) { provider, base ->
                 SettingsState(
-                    apiKey = (values[0] as? String) ?: "",
-                    selectedModel = values[1] as String,
-                    aiMaxIterations = values[2] as Int,
-                    autoConnect = values[3] as Boolean,
-                    defaultProjectPath = values[4] as String,
-                    permissionDuration = values[5] as Long,
-                    hapticFeedback = values[6] as Boolean,
-                    darkMode = values[7] as Boolean,
-                    auditRetentionDays = values[8] as Int
+                    aiProvider = provider.aiProvider,
+                    apiKey = provider.apiKey,
+                    selectedModel = provider.selectedModel,
+                    claudeApiKey = provider.claudeApiKey,
+                    claudeModel = provider.claudeModel,
+                    aiMaxIterations = base.aiMaxIterations,
+                    autoConnect = base.autoConnect,
+                    defaultProjectPath = base.defaultProjectPath,
+                    permissionDuration = base.permissionDuration,
+                    hapticFeedback = base.hapticFeedback,
+                    darkMode = base.darkMode,
+                    auditRetentionDays = base.auditRetentionDays
                 )
             }.combine(
                 combine(
@@ -138,8 +170,11 @@ class SettingsViewModel @Inject constructor(
                 )
             }.collect { settings ->
                 _state.update { it.copy(
+                    aiProvider = settings.aiProvider,
                     apiKey = settings.apiKey,
                     selectedModel = settings.selectedModel,
+                    claudeApiKey = settings.claudeApiKey,
+                    claudeModel = settings.claudeModel,
                     aiMaxIterations = settings.aiMaxIterations,
                     autoConnect = settings.autoConnect,
                     defaultProjectPath = settings.defaultProjectPath,
@@ -189,6 +224,27 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setAiMaxIterations(value)
             _state.update { it.copy(aiMaxIterations = value) }
+        }
+    }
+
+    fun setAiProvider(provider: AiProvider) {
+        viewModelScope.launch {
+            settingsStore.setAiProvider(provider)
+            _state.update { it.copy(aiProvider = provider) }
+        }
+    }
+
+    fun setClaudeApiKey(key: String) {
+        viewModelScope.launch {
+            settingsStore.setClaudeApiKey(key)
+            _state.update { it.copy(claudeApiKey = key) }
+        }
+    }
+
+    fun setClaudeModel(model: String) {
+        viewModelScope.launch {
+            settingsStore.setClaudeModel(model)
+            _state.update { it.copy(claudeModel = model) }
         }
     }
 
@@ -350,6 +406,24 @@ class SettingsViewModel @Inject constructor(
         }
     }
 }
+
+private data class ProviderSettingsBundle(
+    val aiProvider: AiProvider,
+    val apiKey: String,
+    val selectedModel: String,
+    val claudeApiKey: String,
+    val claudeModel: String
+)
+
+private data class BaseSettingsBundle(
+    val aiMaxIterations: Int,
+    val autoConnect: Boolean,
+    val defaultProjectPath: String,
+    val permissionDuration: Long,
+    val hapticFeedback: Boolean,
+    val darkMode: Boolean,
+    val auditRetentionDays: Int
+)
 
 private data class TtsSettingsBundle(
     val autoApproveMedium: Boolean,

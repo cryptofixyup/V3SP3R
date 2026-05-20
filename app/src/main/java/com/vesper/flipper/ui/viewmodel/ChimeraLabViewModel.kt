@@ -2,7 +2,7 @@ package com.vesper.flipper.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.vesper.flipper.ai.OpenRouterClient
+import com.vesper.flipper.ai.AiClientRouter
 import com.vesper.flipper.ble.BleServiceManager
 import com.vesper.flipper.ble.FlipperFileSystem
 import com.vesper.flipper.domain.model.ChimeraProject
@@ -30,7 +30,7 @@ import javax.inject.Inject
 class ChimeraLabViewModel @Inject constructor(
     private val bleServiceManager: BleServiceManager,
     private val fileSystem: FlipperFileSystem,
-    private val openRouterClient: OpenRouterClient
+    private val openRouterClient: AiClientRouter
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChimeraUiState())

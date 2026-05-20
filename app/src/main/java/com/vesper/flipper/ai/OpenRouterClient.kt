@@ -35,7 +35,7 @@ import javax.inject.Singleton
 @Singleton
 class OpenRouterClient @Inject constructor(
     private val settingsStore: SettingsStore
-) {
+) : AiClient {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -70,7 +70,7 @@ class OpenRouterClient @Inject constructor(
      * Send a chat completion request with tool calling.
      * Includes rate limiting, retry logic with exponential backoff, and response validation.
      */
-    suspend fun chat(
+    override suspend fun chat(
         messages: List<ChatMessage>,
         sessionId: String
     ): ChatCompletionResult = withContext(Dispatchers.IO) {
@@ -188,7 +188,7 @@ class OpenRouterClient @Inject constructor(
      * attachments with the text description. This allows the primary model
      * (which may not support images) to understand what the user photographed.
      */
-    internal suspend fun preprocessImagesAsText(
+    override suspend fun preprocessImagesAsText(
         messages: List<ChatMessage>,
         apiKey: String
     ): List<ChatMessage> = coroutineScope {
@@ -241,7 +241,7 @@ class OpenRouterClient @Inject constructor(
      * Sends the image to the vision model with a custom prompt and returns the description.
      * Tries multiple vision model candidates for resilience.
      */
-    suspend fun describeImageForAgent(
+    override suspend fun describeImageForAgent(
         attachment: ImageAttachment,
         prompt: String
     ): String? = withContext(Dispatchers.IO) {
@@ -396,7 +396,7 @@ class OpenRouterClient @Inject constructor(
      * Used by ForgeEngine for payload generation where we just need text output.
      * Returns the AI's text response or null on failure.
      */
-    suspend fun chatSimple(prompt: String): String? = withContext(Dispatchers.IO) {
+    override suspend fun chatSimple(prompt: String): String? = withContext(Dispatchers.IO) {
         if (!rateLimiter.tryAcquire()) return@withContext null
 
         val apiKey = settingsStore.apiKey.first() ?: return@withContext null
@@ -727,7 +727,7 @@ class OpenRouterClient @Inject constructor(
     /**
      * Parse tool call arguments and include a diagnostic error on failure.
      */
-    fun parseCommandDetailed(arguments: String): ParsedCommand {
+    override fun parseCommandDetailed(arguments: String): ParsedCommand {
         val trimmedArguments = arguments.trim()
         if (trimmedArguments.isEmpty()) {
             return ParsedCommand(
@@ -1238,7 +1238,7 @@ class OpenRouterClient @Inject constructor(
     /**
      * Format command result for tool response
      */
-    fun formatResult(result: CommandResult): String {
+    override fun formatResult(result: CommandResult): String {
         return json.encodeToString(result)
     }
 
@@ -1246,10 +1246,10 @@ class OpenRouterClient @Inject constructor(
      * Simple message sending without tool calling.
      * Used for AI features like payload generation, analysis, etc.
      */
-    suspend fun sendMessage(
+    override suspend fun sendMessage(
         message: String,
-        conversationHistory: List<ChatMessage> = emptyList(),
-        customSystemPrompt: String? = null
+        conversationHistory: List<ChatMessage>,
+        customSystemPrompt: String?
     ): Result<String> {
         val messages = buildList {
             addAll(conversationHistory)
@@ -1266,9 +1266,9 @@ class OpenRouterClient @Inject constructor(
     /**
      * Message sending without tools, keeping multimodal/user history support.
      */
-    suspend fun sendMessagesWithoutTools(
+    override suspend fun sendMessagesWithoutTools(
         messages: List<ChatMessage>,
-        customSystemPrompt: String? = null
+        customSystemPrompt: String?
     ): Result<String> = withContext(Dispatchers.IO) {
         // Check rate limit
         if (!rateLimiter.tryAcquire()) {
