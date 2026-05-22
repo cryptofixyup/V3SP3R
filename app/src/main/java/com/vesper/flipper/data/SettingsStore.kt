@@ -314,12 +314,33 @@ class SettingsStore @Inject constructor(
     }
 
     suspend fun setGlassesBridgeUrl(url: String?) {
+        if (!url.isNullOrBlank()) {
+            val trimmed = url.trim()
+            val hostPart = when {
+                trimmed.startsWith("wss://", ignoreCase = true) -> trimmed.substring(6)
+                trimmed.startsWith("ws://", ignoreCase = true)  -> trimmed.substring(5)
+                trimmed.startsWith("https://", ignoreCase = true) -> trimmed.substring(8)
+                trimmed.startsWith("http://", ignoreCase = true)  -> trimmed.substring(7)
+                else -> trimmed
+            }
+            if (hostPart.isBlank() || hostPart.contains(' ') || trimmed.length > 500) return
+        }
         context.dataStore.edit { preferences ->
             if (url.isNullOrBlank()) {
                 preferences.remove(GLASSES_BRIDGE_URL)
             } else {
-                preferences[GLASSES_BRIDGE_URL] = url
+                preferences[GLASSES_BRIDGE_URL] = url.trim()
             }
+        }
+    }
+
+    // Web file server access token — generated once, stored encrypted, included in the server URL.
+    suspend fun getOrCreateWebServerToken(): String = withContext(Dispatchers.IO) {
+        encryptedStorage.getString("web_server_token") ?: run {
+            val token = java.util.UUID.randomUUID().toString().replace("-", "") +
+                java.util.UUID.randomUUID().toString().replace("-", "")
+            encryptedStorage.putString("web_server_token", token)
+            token
         }
     }
 

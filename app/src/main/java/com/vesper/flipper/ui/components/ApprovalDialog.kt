@@ -29,7 +29,7 @@ import com.vesper.flipper.domain.model.RiskLevel
 import com.vesper.flipper.ui.theme.*
 import kotlinx.coroutines.delay
 
-private const val DOUBLE_TAP_ARM_TIMEOUT_MS = 1800L
+private const val DOUBLE_TAP_ARM_TIMEOUT_MS = 3000L
 
 @Composable
 fun ApprovalDialog(

@@ -2,7 +2,10 @@ package com.vesper.flipper.data.database
 
 import android.content.Context
 import androidx.room.*
+import com.vesper.flipper.security.EncryptedStorage
 import kotlinx.coroutines.flow.Flow
+import net.sqlcipher.database.SQLiteDatabase
+import net.sqlcipher.database.SupportFactory
 
 @Database(
     entities = [AuditEntryEntity::class, ChatMessageEntity::class],
@@ -19,15 +22,28 @@ abstract class VesperDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): VesperDatabase {
             return INSTANCE ?: synchronized(this) {
+                val passphrase = getOrCreateDbPassphrase(context)
+                val factory = SupportFactory(SQLiteDatabase.getBytes(passphrase.toCharArray()))
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     VesperDatabase::class.java,
                     "vesper_database"
                 )
+                    .openHelperFactory(factory)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        private fun getOrCreateDbPassphrase(context: Context): String {
+            val storage = EncryptedStorage(context)
+            return storage.getString("db_passphrase") ?: run {
+                val passphrase = java.util.UUID.randomUUID().toString().replace("-", "") +
+                    java.util.UUID.randomUUID().toString().replace("-", "")
+                storage.putString("db_passphrase", passphrase)
+                passphrase
             }
         }
     }

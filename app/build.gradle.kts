@@ -147,8 +147,10 @@ dependencies {
     // USB Serial
     implementation("com.github.mik3y:usb-serial-for-android:3.8.1")
 
-    // Security / Encrypted SharedPrefs
+    // Security / Encrypted SharedPrefs + SQLCipher (Room DB encryption)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
+    implementation("androidx.sqlite:sqlite-ktx:2.4.0")
 
     // Protobuf (Flipper device protocol)
     implementation("com.google.protobuf:protobuf-java:3.25.5")
