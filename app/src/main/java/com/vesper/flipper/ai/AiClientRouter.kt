@@ -5,7 +5,10 @@ import com.vesper.flipper.data.SettingsStore
 import com.vesper.flipper.domain.model.ChatMessage
 import com.vesper.flipper.domain.model.CommandResult
 import com.vesper.flipper.domain.model.ImageAttachment
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +34,10 @@ class AiClientRouter @Inject constructor(
 
     override suspend fun chat(messages: List<ChatMessage>, sessionId: String) =
         active().chat(messages, sessionId)
+
+    override fun chatStream(messages: List<ChatMessage>, sessionId: String): Flow<ChatStreamEvent> = flow {
+        emitAll(active().chatStream(messages, sessionId))
+    }
 
     override suspend fun preprocessImagesAsText(messages: List<ChatMessage>, apiKey: String) =
         active().preprocessImagesAsText(messages, apiKey)

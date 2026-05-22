@@ -7,7 +7,10 @@ import com.vesper.flipper.security.InputValidator
 import com.vesper.flipper.security.RateLimiter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -153,6 +156,167 @@ class ClaudeClient @Inject constructor(
 
         executeWithRetry(apiKey, requestBody)
     }
+
+    override fun chatStream(messages: List<ChatMessage>, sessionId: String): Flow<ChatStreamEvent> = flow {
+        if (!rateLimiter.tryAcquire()) {
+            emit(ChatStreamEvent.StreamError("Rate limit exceeded"))
+            return@flow
+        }
+        val apiKey = settingsStore.claudeApiKey.first() ?: run {
+            emit(ChatStreamEvent.StreamError("Anthropic API key not configured"))
+            return@flow
+        }
+        if (!isValidClaudeApiKey(apiKey)) {
+            emit(ChatStreamEvent.StreamError("Invalid Anthropic API key format"))
+            return@flow
+        }
+
+        val model = settingsStore.claudeModel.first()
+        val glassesEnabled = settingsStore.glassesEnabled.first()
+        val systemPrompt = if (glassesEnabled) {
+            VesperPrompts.SYSTEM_PROMPT + "\n\n" + VesperPrompts.SMARTGLASSES_ADDENDUM
+        } else {
+            VesperPrompts.SYSTEM_PROMPT
+        }
+        val tool = if (glassesEnabled) executeCommandTool else executeCommandToolWithoutGlasses()
+        val anthropicMessages = buildAnthropicMessages(messages)
+
+        val requestBody = buildJsonObject {
+            put("model", model)
+            put("max_tokens", TOOL_CALL_MAX_TOKENS)
+            put("stream", true)
+            putJsonArray("system") {
+                add(buildJsonObject {
+                    put("type", "text")
+                    put("text", systemPrompt)
+                    put("cache_control", buildJsonObject { put("type", "ephemeral") })
+                })
+            }
+            putJsonArray("tools") {
+                add(JsonObject(tool.toMutableMap().also {
+                    it["cache_control"] = buildJsonObject { put("type", "ephemeral") }
+                }))
+            }
+            put("tool_choice", buildJsonObject { put("type", "auto") })
+            put("messages", JsonArray(anthropicMessages))
+        }
+
+        val body = json.encodeToString(requestBody).toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(CLAUDE_API_URL)
+            .addHeader("x-api-key", apiKey)
+            .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .addHeader("anthropic-beta", ANTHROPIC_BETA_CACHE)
+            .addHeader("content-type", "application/json")
+            .addHeader("accept", "text/event-stream")
+            .post(body)
+            .build()
+
+        var streamCompleted = false
+        try {
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errBody = runCatching { response.body?.string() }.getOrNull() ?: "unknown error"
+                    emit(ChatStreamEvent.StreamError("Anthropic API error ${response.code}: ${errBody.take(200)}"))
+                    return@use
+                }
+                val reader = response.body?.charStream()?.buffered() ?: run {
+                    emit(ChatStreamEvent.StreamError("Empty response body"))
+                    return@use
+                }
+
+                val activeBlocks = mutableMapOf<Int, SseBlock>()
+                var streamModel = model
+                var inputTokens = 0
+                var outputTokens = 0
+
+                var line = reader.readLine()
+                while (line != null) {
+                    if (line.startsWith("data: ")) {
+                        val data = line.removePrefix("data: ").trim()
+                        if (data.isNotBlank()) {
+                            val obj = runCatching {
+                                json.parseToJsonElement(data).jsonObject
+                            }.getOrNull()
+                            if (obj != null) {
+                                when (obj["type"]?.jsonPrimitive?.contentOrNull) {
+                                    "message_start" -> {
+                                        val msg = obj["message"]?.jsonObject
+                                        streamModel = msg?.get("model")?.jsonPrimitive?.contentOrNull ?: model
+                                        val usage = msg?.get("usage")?.jsonObject
+                                        inputTokens = usage?.get("input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+                                        val cacheRead = usage?.get("cache_read_input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+                                        val cacheCreation = usage?.get("cache_creation_input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+                                        if (cacheRead > 0 || cacheCreation > 0) {
+                                            Log.d(TAG, "Stream cache: read=$cacheRead created=$cacheCreation")
+                                        }
+                                    }
+                                    "content_block_start" -> {
+                                        val index = obj["index"]?.jsonPrimitive?.intOrNull ?: -1
+                                        val block = obj["content_block"]?.jsonObject
+                                        val blockType = block?.get("type")?.jsonPrimitive?.contentOrNull
+                                        if (index >= 0 && blockType != null) {
+                                            activeBlocks[index] = SseBlock(
+                                                type = blockType,
+                                                id = block?.get("id")?.jsonPrimitive?.contentOrNull ?: "",
+                                                name = block?.get("name")?.jsonPrimitive?.contentOrNull ?: ""
+                                            )
+                                        }
+                                    }
+                                    "content_block_delta" -> {
+                                        val index = obj["index"]?.jsonPrimitive?.intOrNull ?: -1
+                                        val delta = obj["delta"]?.jsonObject
+                                        when (delta?.get("type")?.jsonPrimitive?.contentOrNull) {
+                                            "text_delta" -> {
+                                                val text = delta?.get("text")?.jsonPrimitive?.contentOrNull ?: ""
+                                                if (text.isNotEmpty()) emit(ChatStreamEvent.TextDelta(text))
+                                            }
+                                            "input_json_delta" -> {
+                                                val partial = delta?.get("partial_json")?.jsonPrimitive?.contentOrNull ?: ""
+                                                activeBlocks[index]?.inputJson?.append(partial)
+                                            }
+                                        }
+                                    }
+                                    "content_block_stop" -> {
+                                        val index = obj["index"]?.jsonPrimitive?.intOrNull ?: -1
+                                        val block = activeBlocks.remove(index)
+                                        if (block?.type == "tool_use" && block.id.isNotBlank() && block.name.isNotBlank()) {
+                                            emit(ChatStreamEvent.ToolCallComplete(
+                                                ToolCall(id = block.id, name = block.name, arguments = block.inputJson.toString())
+                                            ))
+                                        }
+                                    }
+                                    "message_delta" -> {
+                                        outputTokens = obj["usage"]?.jsonObject
+                                            ?.get("output_tokens")?.jsonPrimitive?.intOrNull ?: outputTokens
+                                    }
+                                    "message_stop" -> {
+                                        streamCompleted = true
+                                        emit(ChatStreamEvent.Done(
+                                            model = streamModel,
+                                            inputTokens = inputTokens,
+                                            outputTokens = outputTokens
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    line = reader.readLine()
+                }
+
+                if (!streamCompleted) {
+                    streamCompleted = true
+                    emit(ChatStreamEvent.Done(model = streamModel, inputTokens = inputTokens, outputTokens = outputTokens))
+                }
+            }
+        } catch (e: java.io.IOException) {
+            if (!streamCompleted) emit(ChatStreamEvent.StreamError("Network error: ${e.message}"))
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            if (!streamCompleted) emit(ChatStreamEvent.StreamError("Streaming error: ${e.message}"))
+        }
+    }.flowOn(Dispatchers.IO)
 
     // Claude natively handles images — return messages unchanged so chat() receives them.
     override suspend fun preprocessImagesAsText(
@@ -554,6 +718,13 @@ class ClaudeClient @Inject constructor(
             ChatCompletionResult.Error("Failed to parse Claude response: ${e.message}")
         }
     }
+
+    private data class SseBlock(
+        val type: String,
+        val id: String = "",
+        val name: String = "",
+        val inputJson: StringBuilder = StringBuilder()
+    )
 
     private fun isValidClaudeApiKey(key: String): Boolean {
         // Claude keys look like: sk-ant-api03-...  or  sk-ant-...

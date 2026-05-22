@@ -3,6 +3,7 @@ package com.vesper.flipper.ai
 import com.vesper.flipper.domain.model.ChatMessage
 import com.vesper.flipper.domain.model.CommandResult
 import com.vesper.flipper.domain.model.ImageAttachment
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Common interface for AI provider clients (OpenRouter, Claude/Anthropic, etc.).
@@ -10,6 +11,7 @@ import com.vesper.flipper.domain.model.ImageAttachment
  */
 interface AiClient {
     suspend fun chat(messages: List<ChatMessage>, sessionId: String): ChatCompletionResult
+    fun chatStream(messages: List<ChatMessage>, sessionId: String): Flow<ChatStreamEvent>
     suspend fun preprocessImagesAsText(messages: List<ChatMessage>, apiKey: String): List<ChatMessage>
     suspend fun chatSimple(prompt: String): String?
     suspend fun sendMessage(

@@ -338,8 +338,8 @@ class VesperAgent @Inject constructor(
                 )
             )
 
-            // Send API messages (images replaced with text descriptions) to the model
-            val result = openRouterClient.chat(apiMessages, currentSessionId)
+            // Stream response from model (images replaced with text descriptions in apiMessages)
+            val result = callApi(apiMessages)
 
             when (result) {
                 is ChatCompletionResult.Error -> {
@@ -636,6 +636,41 @@ class VesperAgent @Inject constructor(
                     "Increase \"AI Max Iterations\" in Settings if needed."
         )
         return _conversationState.value
+    }
+
+    /**
+     * Collect a streaming API call and return the result as a [ChatCompletionResult].
+     * Updates [_conversationState].streamingContent with partial text in real-time.
+     */
+    private suspend fun callApi(messages: List<ChatMessage>): ChatCompletionResult {
+        var streamedText = ""
+        val toolCallsFromStream = mutableListOf<ToolCall>()
+        var streamError: String? = null
+        var done = ChatStreamEvent.Done()
+
+        openRouterClient.chatStream(messages, currentSessionId).collect { event ->
+            when (event) {
+                is ChatStreamEvent.TextDelta -> {
+                    streamedText += event.text
+                    _conversationState.update { it.copy(streamingContent = streamedText) }
+                }
+                is ChatStreamEvent.ToolCallComplete -> toolCallsFromStream.add(event.toolCall)
+                is ChatStreamEvent.StreamError -> streamError = event.message
+                is ChatStreamEvent.Done -> done = event
+            }
+        }
+        _conversationState.update { it.copy(streamingContent = "") }
+
+        return if (streamError != null) {
+            ChatCompletionResult.Error(streamError!!)
+        } else {
+            ChatCompletionResult.Success(
+                content = streamedText,
+                toolCalls = toolCallsFromStream.takeIf { it.isNotEmpty() },
+                model = done.model,
+                tokensUsed = done.outputTokens.takeIf { it > 0 }
+            )
+        }
     }
 
     private suspend fun restorePersistedConversation() {

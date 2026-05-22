@@ -181,6 +181,13 @@ fun ChatScreen(
         }
     }
 
+    // Auto-scroll to streaming bubble when it first appears
+    LaunchedEffect(conversationState.streamingContent.isNotEmpty()) {
+        if (conversationState.streamingContent.isNotEmpty()) {
+            listState.animateScrollToItem(conversationState.messages.size)
+        }
+    }
+
     // Show approval dialog if pending
     conversationState.pendingApproval?.let { approval ->
         ApprovalDialog(
@@ -378,7 +385,12 @@ fun ChatScreen(
                         )
                     }
 
-                    if (conversationState.isLoading) {
+                    val streaming = conversationState.streamingContent
+                    if (streaming.isNotEmpty()) {
+                        item(key = "streaming_bubble") {
+                            StreamingBubble(text = streaming)
+                        }
+                    } else if (conversationState.isLoading) {
                         item {
                             LoadingIndicator(progress = conversationState.progress)
                         }
@@ -766,6 +778,45 @@ private fun ToolCallDisplay(toolCall: ToolCall) {
                     style = MaterialTheme.typography.labelMedium,
                     fontFamily = FontFamily.Monospace,
                     color = VesperGold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+@Composable
+private fun StreamingBubble(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(brush = Brush.radialGradient(colors = listOf(VesperWine, VesperWineDark))),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "V",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Light,
+                fontFamily = FontFamily.Serif,
+                color = VesperGold
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.widthIn(max = 300.dp)) {
+            Surface(
+                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Text(
+                    text = text,
+                    modifier = Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

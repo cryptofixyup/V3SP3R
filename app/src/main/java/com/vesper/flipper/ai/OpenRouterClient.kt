@@ -10,7 +10,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -389,6 +391,19 @@ class OpenRouterClient @Inject constructor(
 
         Log.e(TAG, "describeImage: ALL vision models failed for image (base64len=$base64Len)")
         return@withContext null
+    }
+
+    override fun chatStream(messages: List<ChatMessage>, sessionId: String): Flow<ChatStreamEvent> = flow {
+        when (val result = chat(messages, sessionId)) {
+            is ChatCompletionResult.Success -> {
+                if (result.content.isNotBlank()) emit(ChatStreamEvent.TextDelta(result.content))
+                result.toolCalls?.forEach { emit(ChatStreamEvent.ToolCallComplete(it)) }
+                emit(ChatStreamEvent.Done(model = result.model, outputTokens = result.tokensUsed ?: 0))
+            }
+            is ChatCompletionResult.Error -> {
+                emit(ChatStreamEvent.StreamError(result.message))
+            }
+        }
     }
 
     /**

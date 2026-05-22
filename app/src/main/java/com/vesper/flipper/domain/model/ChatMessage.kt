@@ -112,7 +112,8 @@ data class ConversationState(
     val pendingApproval: PendingApproval? = null,
     val progress: AgentProgress? = null,
     val error: String? = null,
-    val sessionId: String = UUID.randomUUID().toString()
+    val sessionId: String = UUID.randomUUID().toString(),
+    val streamingContent: String = ""
 )
 
 data class AgentProgress(
