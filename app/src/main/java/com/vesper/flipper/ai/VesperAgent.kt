@@ -382,7 +382,8 @@ class VesperAgent @Inject constructor(
                             content = result.content,
                             metadata = MessageMetadata(
                                 modelUsed = result.model,
-                                tokensUsed = result.tokensUsed
+                                tokensUsed = result.tokensUsed,
+                                rawContentBlocksJson = result.rawContentBlocksJson
                             )
                         )
                         currentMessages.add(assistantMessage)
@@ -403,7 +404,8 @@ class VesperAgent @Inject constructor(
                         toolCalls = result.toolCalls,
                         metadata = MessageMetadata(
                             modelUsed = result.model,
-                            tokensUsed = result.tokensUsed
+                            tokensUsed = result.tokensUsed,
+                            rawContentBlocksJson = result.rawContentBlocksJson
                         )
                     )
                     currentMessages.add(assistantMessage)
@@ -689,7 +691,8 @@ class VesperAgent @Inject constructor(
                 content = streamedText,
                 toolCalls = toolCallsFromStream.takeIf { it.isNotEmpty() },
                 model = done.model,
-                tokensUsed = done.outputTokens.takeIf { it > 0 }
+                tokensUsed = done.outputTokens.takeIf { it > 0 },
+                rawContentBlocksJson = done.rawContentBlocksJson.takeIf { it != "[]" }
             )
         }
     }

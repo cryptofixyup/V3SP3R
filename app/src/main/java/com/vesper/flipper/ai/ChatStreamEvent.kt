@@ -9,7 +9,11 @@ sealed class ChatStreamEvent {
     data class Done(
         val model: String = "",
         val inputTokens: Int = 0,
-        val outputTokens: Int = 0
+        val outputTokens: Int = 0,
+        /** JSON array string of all content blocks from the assistant turn (text + tool_use +
+         *  compaction). Must be preserved in assistant message metadata and sent back verbatim
+         *  on subsequent requests so the API can reconstruct compacted history. */
+        val rawContentBlocksJson: String = "[]"
     ) : ChatStreamEvent()
     /** Emitted when a thinking content block starts (adaptive thinking is active). */
     object ThinkingStarted : ChatStreamEvent()

@@ -1737,7 +1737,10 @@ sealed class ChatCompletionResult {
         val content: String,
         val toolCalls: List<ToolCall>?,
         val model: String,
-        val tokensUsed: Int?
+        val tokensUsed: Int?,
+        /** JSON array of raw Anthropic content blocks for this turn.
+         *  Preserved and re-sent to the API so compaction blocks survive across turns. */
+        val rawContentBlocksJson: String? = null
     ) : ChatCompletionResult()
 
     data class Error(val message: String) : ChatCompletionResult()

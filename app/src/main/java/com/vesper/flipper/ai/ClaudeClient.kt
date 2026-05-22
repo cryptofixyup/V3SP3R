@@ -142,6 +142,9 @@ class ClaudeClient @Inject constructor(
             effortFor(model)?.let { effort ->
                 put("output_config", buildJsonObject { put("effort", effort) })
             }
+            put("context_management", buildJsonObject {
+                putJsonArray("edits") { add(buildJsonObject { put("type", "compact_20260112") }) }
+            })
             putJsonArray("system") {
                 add(buildJsonObject {
                     put("type", "text")
@@ -193,6 +196,9 @@ class ClaudeClient @Inject constructor(
             effortFor(model)?.let { effort ->
                 put("output_config", buildJsonObject { put("effort", effort) })
             }
+            put("context_management", buildJsonObject {
+                putJsonArray("edits") { add(buildJsonObject { put("type", "compact_20260112") }) }
+            })
             putJsonArray("system") {
                 add(buildJsonObject {
                     put("type", "text")
@@ -234,6 +240,7 @@ class ClaudeClient @Inject constructor(
                 }
 
                 val activeBlocks = mutableMapOf<Int, SseBlock>()
+                val completedBlocks = mutableListOf<JsonObject>()
                 var streamModel = model
                 var inputTokens = 0
                 var outputTokens = 0
@@ -267,7 +274,8 @@ class ClaudeClient @Inject constructor(
                                             activeBlocks[index] = SseBlock(
                                                 type = blockType,
                                                 id = block?.get("id")?.jsonPrimitive?.contentOrNull ?: "",
-                                                name = block?.get("name")?.jsonPrimitive?.contentOrNull ?: ""
+                                                name = block?.get("name")?.jsonPrimitive?.contentOrNull ?: "",
+                                                startBlock = block
                                             )
                                             if (blockType == "thinking") emit(ChatStreamEvent.ThinkingStarted)
                                         }
@@ -278,7 +286,10 @@ class ClaudeClient @Inject constructor(
                                         when (delta?.get("type")?.jsonPrimitive?.contentOrNull) {
                                             "text_delta" -> {
                                                 val text = delta?.get("text")?.jsonPrimitive?.contentOrNull ?: ""
-                                                if (text.isNotEmpty()) emit(ChatStreamEvent.TextDelta(text))
+                                                if (text.isNotEmpty()) {
+                                                    activeBlocks[index]?.text?.append(text)
+                                                    emit(ChatStreamEvent.TextDelta(text))
+                                                }
                                             }
                                             "input_json_delta" -> {
                                                 val partial = delta?.get("partial_json")?.jsonPrimitive?.contentOrNull ?: ""
@@ -290,12 +301,31 @@ class ClaudeClient @Inject constructor(
                                         val index = obj["index"]?.jsonPrimitive?.intOrNull ?: -1
                                         val block = activeBlocks.remove(index)
                                         when (block?.type) {
+                                            "text" -> {
+                                                completedBlocks.add(buildJsonObject {
+                                                    put("type", "text")
+                                                    put("text", block.text.toString())
+                                                })
+                                            }
                                             "tool_use" -> if (block.id.isNotBlank() && block.name.isNotBlank()) {
+                                                val inputObj = runCatching {
+                                                    json.parseToJsonElement(block.inputJson.toString()) as? JsonObject
+                                                }.getOrNull() ?: JsonObject(emptyMap())
+                                                completedBlocks.add(buildJsonObject {
+                                                    put("type", "tool_use")
+                                                    put("id", block.id)
+                                                    put("name", block.name)
+                                                    put("input", inputObj)
+                                                })
                                                 emit(ChatStreamEvent.ToolCallComplete(
                                                     ToolCall(id = block.id, name = block.name, arguments = block.inputJson.toString())
                                                 ))
                                             }
                                             "thinking" -> emit(ChatStreamEvent.ThinkingDone)
+                                            else -> {
+                                                // Preserve unknown block types (e.g. compaction_summary) verbatim
+                                                block?.startBlock?.let { completedBlocks.add(it) }
+                                            }
                                         }
                                     }
                                     "message_delta" -> {
@@ -307,7 +337,10 @@ class ClaudeClient @Inject constructor(
                                         emit(ChatStreamEvent.Done(
                                             model = streamModel,
                                             inputTokens = inputTokens,
-                                            outputTokens = outputTokens
+                                            outputTokens = outputTokens,
+                                            rawContentBlocksJson = json.encodeToString(
+                                                JsonArray(completedBlocks)
+                                            )
                                         ))
                                     }
                                 }
@@ -319,7 +352,12 @@ class ClaudeClient @Inject constructor(
 
                 if (!streamCompleted) {
                     streamCompleted = true
-                    emit(ChatStreamEvent.Done(model = streamModel, inputTokens = inputTokens, outputTokens = outputTokens))
+                    emit(ChatStreamEvent.Done(
+                        model = streamModel,
+                        inputTokens = inputTokens,
+                        outputTokens = outputTokens,
+                        rawContentBlocksJson = json.encodeToString(JsonArray(completedBlocks))
+                    ))
                 }
             }
         } catch (e: java.io.IOException) {
@@ -529,40 +567,63 @@ class ClaudeClient @Inject constructor(
                 }
 
                 MessageRole.ASSISTANT -> {
-                    val toolCalls = msg.toolCalls?.filter { it.id.isNotBlank() && it.name.isNotBlank() }
-                    if (!toolCalls.isNullOrEmpty()) {
-                        if (openToolCallIds.isNotEmpty()) dropUnresolvedAssistantMessages()
-                        val contentParts = mutableListOf<JsonObject>()
-                        if (msg.content.isNotBlank()) {
-                            contentParts.add(buildJsonObject {
-                                put("type", "text")
-                                put("text", msg.content)
-                            })
-                        }
-                        toolCalls.forEach { tc ->
-                            // Parse arguments string back to JsonObject for Anthropic's `input` field
-                            val inputJson = runCatching {
-                                json.parseToJsonElement(tc.arguments) as? JsonObject
-                            }.getOrNull() ?: JsonObject(emptyMap())
+                    if (openToolCallIds.isNotEmpty()) dropUnresolvedAssistantMessages()
 
-                            contentParts.add(buildJsonObject {
-                                put("type", "tool_use")
-                                put("id", tc.id)
-                                put("name", tc.name)
-                                put("input", inputJson)
-                            })
+                    // Prefer the raw content blocks preserved from the original API response.
+                    // This ensures compaction_summary blocks (and any other non-text/tool blocks)
+                    // are sent back verbatim, which is required for server-side compaction to work.
+                    val rawBlocksJson = msg.metadata?.rawContentBlocksJson
+                    val rawBlocks = rawBlocksJson?.let {
+                        runCatching { json.parseToJsonElement(it).jsonArray }.getOrNull()
+                    }
+
+                    if (rawBlocks != null && rawBlocks.isNotEmpty()) {
+                        // Re-register any tool_use IDs so tool results are matched correctly
+                        rawBlocks.forEach { blockElem ->
+                            val block = runCatching { blockElem.jsonObject }.getOrNull() ?: return@forEach
+                            if (block["type"]?.jsonPrimitive?.contentOrNull == "tool_use") {
+                                block["id"]?.jsonPrimitive?.contentOrNull
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?.let { openToolCallIds.add(it) }
+                            }
                         }
                         result.add(buildJsonObject {
                             put("role", "assistant")
-                            put("content", JsonArray(contentParts))
+                            put("content", rawBlocks)
                         })
-                        openToolCallIds.addAll(toolCalls.map { it.id })
-                    } else if (msg.content.isNotBlank()) {
-                        if (openToolCallIds.isNotEmpty()) dropUnresolvedAssistantMessages()
-                        result.add(buildJsonObject {
-                            put("role", "assistant")
-                            put("content", msg.content)
-                        })
+                    } else {
+                        // Fall back to reconstructing content from domain fields
+                        val toolCalls = msg.toolCalls?.filter { it.id.isNotBlank() && it.name.isNotBlank() }
+                        if (!toolCalls.isNullOrEmpty()) {
+                            val contentParts = mutableListOf<JsonObject>()
+                            if (msg.content.isNotBlank()) {
+                                contentParts.add(buildJsonObject {
+                                    put("type", "text")
+                                    put("text", msg.content)
+                                })
+                            }
+                            toolCalls.forEach { tc ->
+                                val inputJson = runCatching {
+                                    json.parseToJsonElement(tc.arguments) as? JsonObject
+                                }.getOrNull() ?: JsonObject(emptyMap())
+                                contentParts.add(buildJsonObject {
+                                    put("type", "tool_use")
+                                    put("id", tc.id)
+                                    put("name", tc.name)
+                                    put("input", inputJson)
+                                })
+                            }
+                            result.add(buildJsonObject {
+                                put("role", "assistant")
+                                put("content", JsonArray(contentParts))
+                            })
+                            openToolCallIds.addAll(toolCalls.map { it.id })
+                        } else if (msg.content.isNotBlank()) {
+                            result.add(buildJsonObject {
+                                put("role", "assistant")
+                                put("content", msg.content)
+                            })
+                        }
                     }
                 }
 
@@ -728,7 +789,10 @@ class ClaudeClient @Inject constructor(
                 content = textContent,
                 toolCalls = toolCalls.takeIf { it.isNotEmpty() },
                 model = model,
-                tokensUsed = inputTokens + outputTokens
+                tokensUsed = inputTokens + outputTokens,
+                rawContentBlocksJson = runCatching {
+                    json.encodeToString(contentArray)
+                }.getOrNull()
             )
         } catch (e: Exception) {
             ChatCompletionResult.Error("Failed to parse Claude response: ${e.message}")
@@ -739,7 +803,10 @@ class ClaudeClient @Inject constructor(
         val type: String,
         val id: String = "",
         val name: String = "",
-        val inputJson: StringBuilder = StringBuilder()
+        val inputJson: StringBuilder = StringBuilder(),
+        val text: StringBuilder = StringBuilder(),
+        /** Full JsonObject from content_block_start (used for compaction/unknown block types). */
+        val startBlock: JsonObject? = null
     )
 
     /** Haiku 4.5 does not support adaptive thinking or the effort parameter. */
@@ -765,7 +832,7 @@ class ClaudeClient @Inject constructor(
         private const val TAG = "ClaudeClient"
         private const val CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
         private const val ANTHROPIC_VERSION = "2023-06-01"
-        private const val ANTHROPIC_BETA_CACHE = "prompt-caching-2024-07-31"
+        private const val ANTHROPIC_BETA_CACHE = "prompt-caching-2024-07-31,compact-2026-01-12"
         private const val MAX_RETRIES = 2
         private const val INITIAL_RETRY_DELAY_MS = 700L
         private const val MAX_RETRY_DELAY_MS = 10_000L
