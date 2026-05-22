@@ -4,9 +4,15 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.vesper.flipper.security.EncryptedStorage
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,6 +24,10 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class SettingsStore @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+
+    // API keys are stored in EncryptedSharedPreferences (AES-256-GCM via Android Keystore).
+    // All other settings remain in plaintext DataStore — they are non-sensitive preferences.
+    private val encryptedStorage: EncryptedStorage by lazy { EncryptedStorage(context) }
 
     // AI Provider selection
     private val AI_PROVIDER = stringPreferencesKey("ai_provider")
@@ -33,17 +43,23 @@ class SettingsStore @Inject constructor(
         }
     }
 
-    // Claude (Anthropic) API Key
-    private val CLAUDE_API_KEY = stringPreferencesKey("claude_api_key")
+    // Claude (Anthropic) API Key — stored in EncryptedSharedPreferences.
+    // Falls back to the old plaintext DataStore entry so existing users are not locked out;
+    // the next call to setClaudeApiKey() will migrate it and wipe the plaintext copy.
+    private val CLAUDE_API_KEY_LEGACY = stringPreferencesKey("claude_api_key")
 
-    val claudeApiKey: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[CLAUDE_API_KEY]
-    }
+    val claudeApiKey: Flow<String?> = flow {
+        val encrypted = withContext(Dispatchers.IO) { encryptedStorage.getString("claude_api_key") }
+        if (encrypted != null) {
+            emit(encrypted)
+        } else {
+            emitAll(context.dataStore.data.map { it[CLAUDE_API_KEY_LEGACY] })
+        }
+    }.flowOn(Dispatchers.IO)
 
     suspend fun setClaudeApiKey(key: String) {
-        context.dataStore.edit { preferences ->
-            preferences[CLAUDE_API_KEY] = key
-        }
+        withContext(Dispatchers.IO) { encryptedStorage.putString("claude_api_key", key) }
+        context.dataStore.edit { it.remove(CLAUDE_API_KEY_LEGACY) }
     }
 
     // Claude model selection
@@ -59,17 +75,22 @@ class SettingsStore @Inject constructor(
         }
     }
 
-    // OpenRouter API Key
-    private val API_KEY = stringPreferencesKey("openrouter_api_key")
+    // OpenRouter API Key — stored in EncryptedSharedPreferences.
+    // Same migration path as the Claude key above.
+    private val OPENROUTER_API_KEY_LEGACY = stringPreferencesKey("openrouter_api_key")
 
-    val apiKey: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[API_KEY]
-    }
+    val apiKey: Flow<String?> = flow {
+        val encrypted = withContext(Dispatchers.IO) { encryptedStorage.getString("openrouter_api_key") }
+        if (encrypted != null) {
+            emit(encrypted)
+        } else {
+            emitAll(context.dataStore.data.map { it[OPENROUTER_API_KEY_LEGACY] })
+        }
+    }.flowOn(Dispatchers.IO)
 
     suspend fun setApiKey(key: String) {
-        context.dataStore.edit { preferences ->
-            preferences[API_KEY] = key
-        }
+        withContext(Dispatchers.IO) { encryptedStorage.putString("openrouter_api_key", key) }
+        context.dataStore.edit { it.remove(OPENROUTER_API_KEY_LEGACY) }
     }
 
     // Selected Model

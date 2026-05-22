@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <include domain="sharedpref" path="."/>
-    <exclude domain="sharedpref" path="api_key_prefs.xml"/>
+    <!--
+      API keys are stored in EncryptedSharedPreferences (vesper_secure_prefs) backed by
+      Android Keystore. Keystore keys are never backed up, so the encrypted blob would be
+      unrecoverable on another device — exclude the prefs file to avoid confusing errors.
+      Also exclude the Room database (conversation history / audit log) and the full DataStore
+      blob; sensitive settings like bridge URLs should not travel to a new device unreviewed.
+    -->
+    <exclude domain="sharedpref" path="vesper_secure_prefs.xml"/>
+    <exclude domain="file" path="datastore/vesper_settings.preferences_pb"/>
+    <exclude domain="database" path="vesper_database"/>
 </full-backup-content>
