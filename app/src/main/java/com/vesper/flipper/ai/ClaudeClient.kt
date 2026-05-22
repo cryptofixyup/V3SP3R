@@ -269,6 +269,7 @@ class ClaudeClient @Inject constructor(
                                                 id = block?.get("id")?.jsonPrimitive?.contentOrNull ?: "",
                                                 name = block?.get("name")?.jsonPrimitive?.contentOrNull ?: ""
                                             )
+                                            if (blockType == "thinking") emit(ChatStreamEvent.ThinkingStarted)
                                         }
                                     }
                                     "content_block_delta" -> {
@@ -288,10 +289,13 @@ class ClaudeClient @Inject constructor(
                                     "content_block_stop" -> {
                                         val index = obj["index"]?.jsonPrimitive?.intOrNull ?: -1
                                         val block = activeBlocks.remove(index)
-                                        if (block?.type == "tool_use" && block.id.isNotBlank() && block.name.isNotBlank()) {
-                                            emit(ChatStreamEvent.ToolCallComplete(
-                                                ToolCall(id = block.id, name = block.name, arguments = block.inputJson.toString())
-                                            ))
+                                        when (block?.type) {
+                                            "tool_use" -> if (block.id.isNotBlank() && block.name.isNotBlank()) {
+                                                emit(ChatStreamEvent.ToolCallComplete(
+                                                    ToolCall(id = block.id, name = block.name, arguments = block.inputJson.toString())
+                                                ))
+                                            }
+                                            "thinking" -> emit(ChatStreamEvent.ThinkingDone)
                                         }
                                     }
                                     "message_delta" -> {
@@ -779,7 +783,7 @@ class ClaudeClient @Inject constructor(
         val CLAUDE_MODELS = listOf(
             com.vesper.flipper.data.ModelInfo("claude-opus-4-7", "Claude Opus 4.7", "Most capable"),
             com.vesper.flipper.data.ModelInfo("claude-sonnet-4-6", "Claude Sonnet 4.6", "Balanced"),
-            com.vesper.flipper.data.ModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", "Fastest")
+            com.vesper.flipper.data.ModelInfo("claude-haiku-4-5", "Claude Haiku 4.5", "Fastest")
         )
         const val DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 

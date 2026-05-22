@@ -315,6 +315,16 @@ class VesperAgent @Inject constructor(
             }
         }
 
+        // Trim API context to keep within a safe message count.
+        // currentMessages is kept intact for UI display; only apiMessages is trimmed.
+        if (apiMessages.size > MAX_API_CONTEXT_MESSAGES) {
+            apiMessages = apiMessages.takeLast(MAX_API_CONTEXT_MESSAGES).toMutableList()
+            // The Anthropic API requires the first message to be from the user.
+            while (apiMessages.isNotEmpty() && apiMessages.first().role != MessageRole.USER) {
+                apiMessages.removeFirst()
+            }
+        }
+
         while (iterations < maxIterations) {
             iterations++
 
@@ -657,6 +667,18 @@ class VesperAgent @Inject constructor(
                 is ChatStreamEvent.ToolCallComplete -> toolCallsFromStream.add(event.toolCall)
                 is ChatStreamEvent.StreamError -> streamError = event.message
                 is ChatStreamEvent.Done -> done = event
+                is ChatStreamEvent.ThinkingStarted -> _conversationState.update { state ->
+                    state.copy(progress = AgentProgress(
+                        stage = AgentProgressStage.MODEL_REQUEST,
+                        detail = "Thinking deeply…"
+                    ))
+                }
+                is ChatStreamEvent.ThinkingDone -> _conversationState.update { state ->
+                    state.copy(progress = AgentProgress(
+                        stage = AgentProgressStage.MODEL_REQUEST,
+                        detail = "Writing response…"
+                    ))
+                }
             }
         }
         _conversationState.update { it.copy(streamingContent = "") }
@@ -835,6 +857,8 @@ class VesperAgent @Inject constructor(
 
     companion object {
         private const val MAX_PERSISTED_MESSAGES = 220
+        /** Maximum number of messages sent to the API per request to stay well within the context window. */
+        private const val MAX_API_CONTEXT_MESSAGES = 80
         private const val CONVERSATION_PERSIST_DEBOUNCE_MS = 250L
         /** ~300KB per image keeps total row size well under Android's 2MB CursorWindow limit. */
         private const val MAX_PERSISTED_IMAGE_BASE64_LENGTH = 300_000
