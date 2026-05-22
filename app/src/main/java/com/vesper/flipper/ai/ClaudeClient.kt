@@ -138,6 +138,10 @@ class ClaudeClient @Inject constructor(
         val requestBody = buildJsonObject {
             put("model", model)
             put("max_tokens", TOOL_CALL_MAX_TOKENS)
+            if (supportsThinking(model)) put("thinking", buildJsonObject { put("type", "adaptive") })
+            effortFor(model)?.let { effort ->
+                put("output_config", buildJsonObject { put("effort", effort) })
+            }
             putJsonArray("system") {
                 add(buildJsonObject {
                     put("type", "text")
@@ -185,6 +189,10 @@ class ClaudeClient @Inject constructor(
             put("model", model)
             put("max_tokens", TOOL_CALL_MAX_TOKENS)
             put("stream", true)
+            if (supportsThinking(model)) put("thinking", buildJsonObject { put("type", "adaptive") })
+            effortFor(model)?.let { effort ->
+                put("output_config", buildJsonObject { put("effort", effort) })
+            }
             putJsonArray("system") {
                 add(buildJsonObject {
                     put("type", "text")
@@ -375,6 +383,10 @@ class ClaudeClient @Inject constructor(
         val requestBody = buildJsonObject {
             put("model", model)
             put("max_tokens", DEFAULT_MAX_TOKENS)
+            if (supportsThinking(model)) put("thinking", buildJsonObject { put("type", "adaptive") })
+            effortFor(model)?.let { effort ->
+                put("output_config", buildJsonObject { put("effort", effort) })
+            }
             putJsonArray("system") {
                 add(buildJsonObject {
                     put("type", "text")
@@ -725,6 +737,20 @@ class ClaudeClient @Inject constructor(
         val name: String = "",
         val inputJson: StringBuilder = StringBuilder()
     )
+
+    /** Haiku 4.5 does not support adaptive thinking or the effort parameter. */
+    private fun supportsThinking(model: String) = "haiku" !in model
+
+    /**
+     * Returns the effort level for the given model, or null for models that
+     * don't accept the `output_config.effort` field (Haiku 4.5).
+     * Opus 4.7 uses "xhigh" — the default in Claude Code and best for agentic loops.
+     */
+    private fun effortFor(model: String): String? = when {
+        "haiku" in model -> null
+        "opus-4-7" in model -> "xhigh"
+        else -> "high"
+    }
 
     private fun isValidClaudeApiKey(key: String): Boolean {
         // Claude keys look like: sk-ant-api03-...  or  sk-ant-...
