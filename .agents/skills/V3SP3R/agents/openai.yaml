@@ -1,0 +1,6 @@
+interface:
+  display_name: "V3SP3R"
+  short_description: "Repo-specific patterns and workflows for V3SP3R"
+  default_prompt: "Use the V3SP3R repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
