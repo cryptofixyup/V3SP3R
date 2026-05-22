@@ -135,8 +135,18 @@ class ClaudeClient @Inject constructor(
         val requestBody = buildJsonObject {
             put("model", model)
             put("max_tokens", TOOL_CALL_MAX_TOKENS)
-            put("system", systemPrompt)
-            putJsonArray("tools") { add(tool) }
+            putJsonArray("system") {
+                add(buildJsonObject {
+                    put("type", "text")
+                    put("text", systemPrompt)
+                    put("cache_control", buildJsonObject { put("type", "ephemeral") })
+                })
+            }
+            putJsonArray("tools") {
+                add(JsonObject(tool.toMutableMap().also {
+                    it["cache_control"] = buildJsonObject { put("type", "ephemeral") }
+                }))
+            }
             put("tool_choice", buildJsonObject { put("type", "auto") })
             put("messages", JsonArray(anthropicMessages))
         }
@@ -201,7 +211,13 @@ class ClaudeClient @Inject constructor(
         val requestBody = buildJsonObject {
             put("model", model)
             put("max_tokens", DEFAULT_MAX_TOKENS)
-            put("system", system)
+            putJsonArray("system") {
+                add(buildJsonObject {
+                    put("type", "text")
+                    put("text", system)
+                    put("cache_control", buildJsonObject { put("type", "ephemeral") })
+                })
+            }
             put("messages", JsonArray(anthropicMessages))
         }
 
@@ -417,6 +433,7 @@ class ClaudeClient @Inject constructor(
             .url(CLAUDE_API_URL)
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", ANTHROPIC_VERSION)
+            .addHeader("anthropic-beta", ANTHROPIC_BETA_CACHE)
             .addHeader("content-type", "application/json")
             .post(body)
             .build()
@@ -490,8 +507,14 @@ class ClaudeClient @Inject constructor(
 
             val stopReason = root["stop_reason"]?.jsonPrimitive?.contentOrNull
             val model = root["model"]?.jsonPrimitive?.contentOrNull ?: ""
-            val inputTokens = root["usage"]?.jsonObject?.get("input_tokens")?.jsonPrimitive?.intOrNull ?: 0
-            val outputTokens = root["usage"]?.jsonObject?.get("output_tokens")?.jsonPrimitive?.intOrNull ?: 0
+            val usage = root["usage"]?.jsonObject
+            val inputTokens = usage?.get("input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+            val outputTokens = usage?.get("output_tokens")?.jsonPrimitive?.intOrNull ?: 0
+            val cacheRead = usage?.get("cache_read_input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+            val cacheCreation = usage?.get("cache_creation_input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+            if (cacheRead > 0 || cacheCreation > 0) {
+                Log.d(TAG, "Prompt cache: read=$cacheRead created=$cacheCreation input=$inputTokens output=$outputTokens")
+            }
 
             val contentArray = root["content"]?.jsonArray
                 ?: return ChatCompletionResult.Error("No content in Claude response")
@@ -541,6 +564,7 @@ class ClaudeClient @Inject constructor(
         private const val TAG = "ClaudeClient"
         private const val CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
         private const val ANTHROPIC_VERSION = "2023-06-01"
+        private const val ANTHROPIC_BETA_CACHE = "prompt-caching-2024-07-31"
         private const val MAX_RETRIES = 2
         private const val INITIAL_RETRY_DELAY_MS = 700L
         private const val MAX_RETRY_DELAY_MS = 10_000L
