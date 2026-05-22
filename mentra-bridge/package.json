@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@mentra/sdk": "^2.1.29",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
