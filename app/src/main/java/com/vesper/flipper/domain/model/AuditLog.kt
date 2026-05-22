@@ -81,7 +81,10 @@ enum class AuditActionType {
     AI_RESPONSE,
 
     @SerialName("error")
-    ERROR
+    ERROR,
+
+    @SerialName("settings_changed")
+    SETTINGS_CHANGED
 }
 
 @Serializable

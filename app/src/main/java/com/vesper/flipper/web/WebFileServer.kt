@@ -30,7 +30,8 @@ import java.util.*
 class WebFileServer(
     private val context: Context,
     private val flipperFileSystem: FlipperFileSystem,
-    private val port: Int = 8888
+    private val port: Int = 8888,
+    private val token: String = ""
 ) {
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
@@ -52,7 +53,8 @@ class WebFileServer(
             try {
                 serverSocket = ServerSocket(port)
                 _isRunning.value = true
-                _serverUrl.value = "http://${getLocalIpAddress()}:$port"
+                val tokenSuffix = if (token.isNotBlank()) "?token=$token" else ""
+                _serverUrl.value = "http://${getLocalIpAddress()}:$port/$tokenSuffix"
 
                 while (isActive) {
                     val socket = serverSocket?.accept() ?: break
@@ -120,9 +122,22 @@ class WebFileServer(
                     }
                 }
 
+                // Token auth: every request must carry ?token=<value> when a token is configured.
+                // /style.css is exempt so browsers don't stall on stylesheet loads.
+                val requestToken = extractQueryParam(path, "token")
+                val tokenOk = token.isBlank() || requestToken == token
+                if (!tokenOk && path != "/style.css") {
+                    writer.println("HTTP/1.1 403 Forbidden")
+                    writer.println("Content-Type: text/plain")
+                    writer.println()
+                    writer.println("403 Forbidden — invalid or missing token")
+                    writer.flush()
+                    return
+                }
+
                 // Route request
                 when {
-                    path == "/" || path == "/index.html" -> serveIndexPage(writer)
+                    path == "/" || path.startsWith("/index.html") -> serveIndexPage(writer)
                     path.startsWith("/api/list") -> handleListApi(path, writer)
                     path.startsWith("/api/read") -> handleReadApi(path, writer)
                     path.startsWith("/api/download") -> handleDownloadApi(path, outputStream)
@@ -140,7 +155,11 @@ class WebFileServer(
     }
 
     private fun serveIndexPage(writer: PrintWriter) {
-        val html = """
+        val html = buildIndexHtml(token)
+        sendHtmlResponse(writer, html)
+    }
+
+    private fun buildIndexHtml(pageToken: String) = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -181,6 +200,8 @@ class WebFileServer(
     </div>
 
     <script>
+        const TOKEN = '${pageToken}';
+        function tok() { return TOKEN ? '&token=' + TOKEN : ''; }
         let currentPath = '/ext';
 
         async function navigate(path) {
@@ -204,7 +225,7 @@ class WebFileServer(
 
         async function loadDirectory(path) {
             try {
-                const res = await fetch('/api/list?path=' + encodeURIComponent(path));
+                const res = await fetch('/api/list?path=' + encodeURIComponent(path) + tok());
                 const data = await res.json();
 
                 if (data.error) {
@@ -278,7 +299,7 @@ class WebFileServer(
 
         async function viewFile(path) {
             try {
-                const res = await fetch('/api/read?path=' + encodeURIComponent(path));
+                const res = await fetch('/api/read?path=' + encodeURIComponent(path) + tok());
                 const data = await res.json();
 
                 if (data.error) {
@@ -301,14 +322,14 @@ class WebFileServer(
         }
 
         function downloadFile(path) {
-            window.location.href = '/api/download?path=' + encodeURIComponent(path);
+            window.location.href = '/api/download?path=' + encodeURIComponent(path) + tok();
         }
 
         async function deleteItem(path, isDir) {
             if (!confirm('Delete ' + path.split('/').pop() + '?')) return;
 
             try {
-                const res = await fetch('/api/delete?path=' + encodeURIComponent(path), { method: 'POST' });
+                const res = await fetch('/api/delete?path=' + encodeURIComponent(path) + tok(), { method: 'POST' });
                 const data = await res.json();
 
                 if (data.error) {
@@ -328,7 +349,7 @@ class WebFileServer(
 
         async function createFolder(name) {
             try {
-                const res = await fetch('/api/mkdir?path=' + encodeURIComponent(currentPath + '/' + name), { method: 'POST' });
+                const res = await fetch('/api/mkdir?path=' + encodeURIComponent(currentPath + '/' + name) + tok(), { method: 'POST' });
                 const data = await res.json();
 
                 if (data.error) {
@@ -350,7 +371,7 @@ class WebFileServer(
             formData.append('file', file);
 
             try {
-                const res = await fetch('/api/upload?path=' + encodeURIComponent(currentPath + '/' + file.name), {
+                const res = await fetch('/api/upload?path=' + encodeURIComponent(currentPath + '/' + file.name) + tok(), {
                     method: 'POST',
                     body: formData
                 });
@@ -378,9 +399,6 @@ class WebFileServer(
 </body>
 </html>
         """.trimIndent()
-
-        sendHtmlResponse(writer, html)
-    }
 
     private fun serveCss(writer: PrintWriter) {
         val css = """

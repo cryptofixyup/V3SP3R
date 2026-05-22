@@ -100,7 +100,11 @@ data class MessageMetadata(
     @SerialName("latency_ms")
     val latencyMs: Long? = null,
     @SerialName("pending_approval_id")
-    val pendingApprovalId: String? = null
+    val pendingApprovalId: String? = null,
+    /** Raw Anthropic content-block array for this assistant turn (JSON string).
+     *  Sent back verbatim so the API can reconstruct history after compaction. */
+    @SerialName("raw_content_blocks_json")
+    val rawContentBlocksJson: String? = null
 )
 
 /**
@@ -112,7 +116,8 @@ data class ConversationState(
     val pendingApproval: PendingApproval? = null,
     val progress: AgentProgress? = null,
     val error: String? = null,
-    val sessionId: String = UUID.randomUUID().toString()
+    val sessionId: String = UUID.randomUUID().toString(),
+    val streamingContent: String = ""
 )
 
 data class AgentProgress(

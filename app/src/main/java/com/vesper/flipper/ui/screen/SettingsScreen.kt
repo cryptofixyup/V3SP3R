@@ -17,6 +17,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.vesper.flipper.ai.ClaudeClient
+import com.vesper.flipper.data.AiProvider
 import com.vesper.flipper.data.SettingsStore
 import com.vesper.flipper.domain.model.Permission
 import com.vesper.flipper.ui.theme.*
@@ -32,6 +34,34 @@ fun SettingsScreen(
     val availableModels by viewModel.availableModels.collectAsState()
     val isRefreshingModels by viewModel.isRefreshingModels.collectAsState()
     var showApiKey by remember { mutableStateOf(false) }
+    var showClaudeApiKey by remember { mutableStateOf(false) }
+    var showAutoApproveHighConfirm by remember { mutableStateOf(false) }
+
+    if (showAutoApproveHighConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAutoApproveHighConfirm = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Enable High-Risk Auto-Approve?") },
+            text = {
+                Text(
+                    "Destructive actions — file deletions, moves, and overwrites — will execute " +
+                    "immediately without an approval dialog.\n\n" +
+                    "Only enable this if you fully trust every request the AI may generate."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAutoApproveHighConfirm = false
+                        viewModel.setAutoApproveHigh(true)
+                    }
+                ) { Text("Enable Anyway", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoApproveHighConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -54,113 +84,220 @@ fun SettingsScreen(
         ) {
             // API Configuration Section
             item {
-                SettingsSection(title = "API Configuration") {
-                    // API Key
-                    OutlinedTextField(
-                        value = state.apiKey,
-                        onValueChange = { viewModel.setApiKey(it) },
-                        label = { Text("OpenRouter API Key") },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (showApiKey) {
-                            VisualTransformation.None
-                        } else {
-                            PasswordVisualTransformation()
-                        },
-                        trailingIcon = {
-                            IconButton(onClick = { showApiKey = !showApiKey }) {
-                                Icon(
-                                    if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = if (showApiKey) "Hide" else "Show"
-                                )
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                SettingsSection(title = "AI Provider") {
+                    // Provider toggle
                     Text(
-                        text = "Paste your OpenRouter key here (starts with \"sk-or-\").",
-                        style = MaterialTheme.typography.bodySmall,
+                        "Choose AI provider",
+                        style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = state.aiProvider == AiProvider.OPENROUTER,
+                            onClick = { viewModel.setAiProvider(AiProvider.OPENROUTER) },
+                            label = { Text("OpenRouter") }
+                        )
+                        FilterChip(
+                            selected = state.aiProvider == AiProvider.CLAUDE,
+                            onClick = { viewModel.setAiProvider(AiProvider.CLAUDE) },
+                            label = { Text("Claude (Anthropic)") }
+                        )
+                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Model Selection
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    if (state.aiProvider == AiProvider.OPENROUTER) {
+                        // OpenRouter API Key
+                        OutlinedTextField(
+                            value = state.apiKey,
+                            onValueChange = { viewModel.setApiKey(it) },
+                            label = { Text("OpenRouter API Key") },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = if (showApiKey) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = { showApiKey = !showApiKey }) {
+                                    Icon(
+                                        if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showApiKey) "Hide" else "Show"
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
                         Text(
-                            "AI Model",
+                            text = "Paste your OpenRouter key here (starts with \"sk-or-\").",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // OpenRouter model selection
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "AI Model",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = { viewModel.refreshAvailableModels() },
+                                enabled = !isRefreshingModels
+                            ) {
+                                if (isRefreshingModels) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Refreshing")
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Refresh")
+                                }
+                            }
+                        }
+                        Text(
+                            text = "Tool calls auto-fallback across multiple models; if it still fails, pick a different model and retry.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        var modelExpanded by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = modelExpanded,
+                            onExpandedChange = { modelExpanded = it }
+                        ) {
+                            OutlinedTextField(
+                                value = viewModel.getModelDisplayName(state.selectedModel),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Model (OpenRouter)") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded)
+                                },
+                                supportingText = { Text(state.selectedModel) },
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = modelExpanded,
+                                onDismissRequest = { modelExpanded = false }
+                            ) {
+                                availableModels.forEach { model ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(model.displayName)
+                                                Text(
+                                                    model.id,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            viewModel.setSelectedModel(model.id)
+                                            modelExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Claude API Key
+                        OutlinedTextField(
+                            value = state.claudeApiKey,
+                            onValueChange = { viewModel.setClaudeApiKey(it) },
+                            label = { Text("Anthropic API Key") },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = if (showClaudeApiKey) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            trailingIcon = {
+                                IconButton(onClick = { showClaudeApiKey = !showClaudeApiKey }) {
+                                    Icon(
+                                        if (showClaudeApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showClaudeApiKey) "Hide" else "Show"
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        Text(
+                            text = "Paste your Anthropic API key (starts with \"sk-ant-\").",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Claude model selection
+                        Text(
+                            "Claude Model",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        TextButton(
-                            onClick = { viewModel.refreshAvailableModels() },
-                            enabled = !isRefreshingModels
+                        var claudeModelExpanded by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = claudeModelExpanded,
+                            onExpandedChange = { claudeModelExpanded = it }
                         ) {
-                            if (isRefreshingModels) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Refreshing")
-                            } else {
-                                Icon(Icons.Default.Refresh, contentDescription = null)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Refresh")
-                            }
-                        }
-                    }
-                    Text(
-                        text = "Tool calls auto-fallback across multiple models; if it still fails, pick a different model and retry.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    var modelExpanded by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = modelExpanded,
-                        onExpandedChange = { modelExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = viewModel.getModelDisplayName(state.selectedModel),
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Model (OpenRouter)") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelExpanded)
-                            },
-                            supportingText = { Text(state.selectedModel) },
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = modelExpanded,
-                            onDismissRequest = { modelExpanded = false }
-                        ) {
-                            availableModels.forEach { model ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            Text(model.displayName)
-                                            Text(
-                                                model.id,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                            OutlinedTextField(
+                                value = ClaudeClient.CLAUDE_MODELS
+                                    .find { it.id == state.claudeModel }?.displayName
+                                    ?: state.claudeModel,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Model (Claude)") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(),
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = claudeModelExpanded)
+                                },
+                                supportingText = { Text(state.claudeModel) },
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = claudeModelExpanded,
+                                onDismissRequest = { claudeModelExpanded = false }
+                            ) {
+                                ClaudeClient.CLAUDE_MODELS.forEach { model ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(model.displayName)
+                                                Text(
+                                                    model.description,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            viewModel.setClaudeModel(model.id)
+                                            claudeModelExpanded = false
                                         }
-                                    },
-                                    onClick = {
-                                        viewModel.setSelectedModel(model.id)
-                                        modelExpanded = false
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
@@ -320,7 +457,10 @@ fun SettingsScreen(
                         title = "High risk",
                         subtitle = "Deletes, moves, overwrites, mass ops",
                         checked = state.autoApproveHigh,
-                        onCheckedChange = { viewModel.setAutoApproveHigh(it) }
+                        onCheckedChange = { enabled ->
+                            if (enabled) showAutoApproveHighConfirm = true
+                            else viewModel.setAutoApproveHigh(false)
+                        }
                     )
                     if (state.autoApproveHigh) {
                         Spacer(modifier = Modifier.height(4.dp))

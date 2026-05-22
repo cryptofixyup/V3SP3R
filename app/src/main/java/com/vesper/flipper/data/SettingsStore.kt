@@ -4,11 +4,19 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
+import com.vesper.flipper.security.EncryptedStorage
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+
+enum class AiProvider { OPENROUTER, CLAUDE }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "vesper_settings")
 
@@ -17,17 +25,72 @@ class SettingsStore @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
-    // OpenRouter API Key
-    private val API_KEY = stringPreferencesKey("openrouter_api_key")
+    // API keys are stored in EncryptedSharedPreferences (AES-256-GCM via Android Keystore).
+    // All other settings remain in plaintext DataStore — they are non-sensitive preferences.
+    private val encryptedStorage: EncryptedStorage by lazy { EncryptedStorage(context) }
 
-    val apiKey: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[API_KEY]
+    // AI Provider selection
+    private val AI_PROVIDER = stringPreferencesKey("ai_provider")
+
+    val aiProvider: Flow<AiProvider> = context.dataStore.data.map { preferences ->
+        preferences[AI_PROVIDER]?.let { runCatching { AiProvider.valueOf(it) }.getOrNull() }
+            ?: AiProvider.OPENROUTER
     }
 
-    suspend fun setApiKey(key: String) {
+    suspend fun setAiProvider(provider: AiProvider) {
         context.dataStore.edit { preferences ->
-            preferences[API_KEY] = key
+            preferences[AI_PROVIDER] = provider.name
         }
+    }
+
+    // Claude (Anthropic) API Key — stored in EncryptedSharedPreferences.
+    // Falls back to the old plaintext DataStore entry so existing users are not locked out;
+    // the next call to setClaudeApiKey() will migrate it and wipe the plaintext copy.
+    private val CLAUDE_API_KEY_LEGACY = stringPreferencesKey("claude_api_key")
+
+    val claudeApiKey: Flow<String?> = flow {
+        val encrypted = withContext(Dispatchers.IO) { encryptedStorage.getString("claude_api_key") }
+        if (encrypted != null) {
+            emit(encrypted)
+        } else {
+            emitAll(context.dataStore.data.map { it[CLAUDE_API_KEY_LEGACY] })
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun setClaudeApiKey(key: String) {
+        withContext(Dispatchers.IO) { encryptedStorage.putString("claude_api_key", key) }
+        context.dataStore.edit { it.remove(CLAUDE_API_KEY_LEGACY) }
+    }
+
+    // Claude model selection
+    private val CLAUDE_MODEL = stringPreferencesKey("claude_model")
+
+    val claudeModel: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[CLAUDE_MODEL] ?: DEFAULT_CLAUDE_MODEL
+    }
+
+    suspend fun setClaudeModel(model: String) {
+        context.dataStore.edit { preferences ->
+            preferences[CLAUDE_MODEL] = model
+        }
+    }
+
+    // OpenRouter API Key — stored in EncryptedSharedPreferences.
+    // Same migration path as the Claude key above.
+    private val OPENROUTER_API_KEY_LEGACY = stringPreferencesKey("openrouter_api_key")
+
+    val apiKey: Flow<String?> = flow {
+        val encrypted = withContext(Dispatchers.IO) { encryptedStorage.getString("openrouter_api_key") }
+        if (encrypted != null) {
+            emit(encrypted)
+        } else {
+            emitAll(context.dataStore.data.map { it[OPENROUTER_API_KEY_LEGACY] })
+        }
+    }.flowOn(Dispatchers.IO)
+
+    suspend fun setApiKey(key: String) {
+        withContext(Dispatchers.IO) { encryptedStorage.putString("openrouter_api_key", key) }
+        context.dataStore.edit { it.remove(OPENROUTER_API_KEY_LEGACY) }
     }
 
     // Selected Model
@@ -251,12 +314,33 @@ class SettingsStore @Inject constructor(
     }
 
     suspend fun setGlassesBridgeUrl(url: String?) {
+        if (!url.isNullOrBlank()) {
+            val trimmed = url.trim()
+            val hostPart = when {
+                trimmed.startsWith("wss://", ignoreCase = true) -> trimmed.substring(6)
+                trimmed.startsWith("ws://", ignoreCase = true)  -> trimmed.substring(5)
+                trimmed.startsWith("https://", ignoreCase = true) -> trimmed.substring(8)
+                trimmed.startsWith("http://", ignoreCase = true)  -> trimmed.substring(7)
+                else -> trimmed
+            }
+            if (hostPart.isBlank() || hostPart.contains(' ') || trimmed.length > 500) return
+        }
         context.dataStore.edit { preferences ->
             if (url.isNullOrBlank()) {
                 preferences.remove(GLASSES_BRIDGE_URL)
             } else {
-                preferences[GLASSES_BRIDGE_URL] = url
+                preferences[GLASSES_BRIDGE_URL] = url.trim()
             }
+        }
+    }
+
+    // Web file server access token — generated once, stored encrypted, included in the server URL.
+    suspend fun getOrCreateWebServerToken(): String = withContext(Dispatchers.IO) {
+        encryptedStorage.getString("web_server_token") ?: run {
+            val token = java.util.UUID.randomUUID().toString().replace("-", "") +
+                java.util.UUID.randomUUID().toString().replace("-", "")
+            encryptedStorage.putString("web_server_token", token)
+            token
         }
     }
 
@@ -303,6 +387,7 @@ class SettingsStore @Inject constructor(
     companion object {
         // Default to the largest Hermes 4 model on OpenRouter.
         const val DEFAULT_MODEL = "nousresearch/hermes-4-405b"
+        const val DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
         // Shimmer: soft, warm female — default TTS voice (OpenAI via OpenRouter)
         const val DEFAULT_TTS_VOICE = "shimmer"
         const val DEFAULT_AI_MAX_ITERATIONS = 10

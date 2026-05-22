@@ -10,7 +10,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -35,7 +37,7 @@ import javax.inject.Singleton
 @Singleton
 class OpenRouterClient @Inject constructor(
     private val settingsStore: SettingsStore
-) {
+) : AiClient {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -70,7 +72,7 @@ class OpenRouterClient @Inject constructor(
      * Send a chat completion request with tool calling.
      * Includes rate limiting, retry logic with exponential backoff, and response validation.
      */
-    suspend fun chat(
+    override suspend fun chat(
         messages: List<ChatMessage>,
         sessionId: String
     ): ChatCompletionResult = withContext(Dispatchers.IO) {
@@ -188,7 +190,7 @@ class OpenRouterClient @Inject constructor(
      * attachments with the text description. This allows the primary model
      * (which may not support images) to understand what the user photographed.
      */
-    internal suspend fun preprocessImagesAsText(
+    override suspend fun preprocessImagesAsText(
         messages: List<ChatMessage>,
         apiKey: String
     ): List<ChatMessage> = coroutineScope {
@@ -241,7 +243,7 @@ class OpenRouterClient @Inject constructor(
      * Sends the image to the vision model with a custom prompt and returns the description.
      * Tries multiple vision model candidates for resilience.
      */
-    suspend fun describeImageForAgent(
+    override suspend fun describeImageForAgent(
         attachment: ImageAttachment,
         prompt: String
     ): String? = withContext(Dispatchers.IO) {
@@ -391,12 +393,25 @@ class OpenRouterClient @Inject constructor(
         return@withContext null
     }
 
+    override fun chatStream(messages: List<ChatMessage>, sessionId: String): Flow<ChatStreamEvent> = flow {
+        when (val result = chat(messages, sessionId)) {
+            is ChatCompletionResult.Success -> {
+                if (result.content.isNotBlank()) emit(ChatStreamEvent.TextDelta(result.content))
+                result.toolCalls?.forEach { emit(ChatStreamEvent.ToolCallComplete(it)) }
+                emit(ChatStreamEvent.Done(model = result.model, outputTokens = result.tokensUsed ?: 0))
+            }
+            is ChatCompletionResult.Error -> {
+                emit(ChatStreamEvent.StreamError(result.message))
+            }
+        }
+    }
+
     /**
      * Simple text-only chat without tool calling.
      * Used by ForgeEngine for payload generation where we just need text output.
      * Returns the AI's text response or null on failure.
      */
-    suspend fun chatSimple(prompt: String): String? = withContext(Dispatchers.IO) {
+    override suspend fun chatSimple(prompt: String): String? = withContext(Dispatchers.IO) {
         if (!rateLimiter.tryAcquire()) return@withContext null
 
         val apiKey = settingsStore.apiKey.first() ?: return@withContext null
@@ -571,7 +586,7 @@ class OpenRouterClient @Inject constructor(
             val toolCalls = rawToolCalls?.mapNotNull { tc ->
                 // Validate tool call structure — reject blanks but log them
                 if (tc.id.isBlank() || tc.function.name.isBlank()) {
-                    Log.w(TAG, "Dropping malformed tool call: id='${tc.id}' name='${tc.function.name}' args='${tc.function.arguments.take(100)}'")
+                    Log.w(TAG, "Dropping malformed tool call: id='${tc.id}' name='${tc.function.name}'")
                     null
                 } else {
                     ToolCall(
@@ -727,7 +742,7 @@ class OpenRouterClient @Inject constructor(
     /**
      * Parse tool call arguments and include a diagnostic error on failure.
      */
-    fun parseCommandDetailed(arguments: String): ParsedCommand {
+    override fun parseCommandDetailed(arguments: String): ParsedCommand {
         val trimmedArguments = arguments.trim()
         if (trimmedArguments.isEmpty()) {
             return ParsedCommand(
@@ -1238,7 +1253,7 @@ class OpenRouterClient @Inject constructor(
     /**
      * Format command result for tool response
      */
-    fun formatResult(result: CommandResult): String {
+    override fun formatResult(result: CommandResult): String {
         return json.encodeToString(result)
     }
 
@@ -1246,10 +1261,10 @@ class OpenRouterClient @Inject constructor(
      * Simple message sending without tool calling.
      * Used for AI features like payload generation, analysis, etc.
      */
-    suspend fun sendMessage(
+    override suspend fun sendMessage(
         message: String,
-        conversationHistory: List<ChatMessage> = emptyList(),
-        customSystemPrompt: String? = null
+        conversationHistory: List<ChatMessage>,
+        customSystemPrompt: String?
     ): Result<String> {
         val messages = buildList {
             addAll(conversationHistory)
@@ -1266,9 +1281,9 @@ class OpenRouterClient @Inject constructor(
     /**
      * Message sending without tools, keeping multimodal/user history support.
      */
-    suspend fun sendMessagesWithoutTools(
+    override suspend fun sendMessagesWithoutTools(
         messages: List<ChatMessage>,
-        customSystemPrompt: String? = null
+        customSystemPrompt: String?
     ): Result<String> = withContext(Dispatchers.IO) {
         // Check rate limit
         if (!rateLimiter.tryAcquire()) {
@@ -1722,7 +1737,10 @@ sealed class ChatCompletionResult {
         val content: String,
         val toolCalls: List<ToolCall>?,
         val model: String,
-        val tokensUsed: Int?
+        val tokensUsed: Int?,
+        /** JSON array of raw Anthropic content blocks for this turn.
+         *  Preserved and re-sent to the API so compaction blocks survive across turns. */
+        val rawContentBlocksJson: String? = null
     ) : ChatCompletionResult()
 
     data class Error(val message: String) : ChatCompletionResult()

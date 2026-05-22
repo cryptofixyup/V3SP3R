@@ -1,5 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
-import { createServer } from "http";
+import { createServer as createHttpServer } from "http";
+import { createServer as createHttpsServer } from "https";
+import * as fs from "fs";
 import { randomUUID } from "crypto";
 import { SystemAuditor } from "./system-auditor";
 import { AuditPersistence } from "./audit-persistence";
@@ -185,9 +187,21 @@ function getWakeGreeting(hasCommand: boolean): string {
 // ==================== WebSocket Relay Server ====================
 
 const PORT = parseInt(process.env.PORT || "8089", 10);
-const wss = new WebSocketServer({ port: PORT });
 
-console.log(`V3SP3R Glasses Bridge running on port ${PORT}`);
+// Optional TLS: set USE_TLS=true, SSL_CERT=/path/cert.pem, SSL_KEY=/path/key.pem
+// to enable wss:// instead of ws://. Recommended for any non-localhost deployment.
+const useTls = process.env.USE_TLS === "true";
+const tlsCert = process.env.SSL_CERT;
+const tlsKey  = process.env.SSL_KEY;
+
+const wsHttpServer = (useTls && tlsCert && tlsKey)
+  ? createHttpsServer({ cert: fs.readFileSync(tlsCert), key: fs.readFileSync(tlsKey) })
+  : createHttpServer();
+
+const wss = new WebSocketServer({ server: wsHttpServer });
+wsHttpServer.listen(PORT);
+
+console.log(`V3SP3R Glasses Bridge running on port ${PORT} (${useTls && tlsCert && tlsKey ? "wss" : "ws"})`);
 
 // ==================== System Auditor ====================
 
@@ -992,7 +1006,7 @@ startMentraIntegration();
 
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || "8088", 10);
 
-const httpServer = createServer((req, res) => {
+const httpServer = createHttpServer((req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(

@@ -1,7 +1,7 @@
 package com.vesper.flipper.glasses
 
 import android.util.Log
-import com.vesper.flipper.ai.OpenRouterClient
+import com.vesper.flipper.ai.AiClientRouter
 import com.vesper.flipper.ai.PhotoCaptureCallback
 import com.vesper.flipper.ai.VesperAgent
 import com.vesper.flipper.data.SettingsStore
@@ -29,7 +29,7 @@ import javax.inject.Singleton
 class GlassesIntegration @Inject constructor(
     val bridge: GlassesBridgeClient,
     private val vesperAgent: VesperAgent,
-    private val openRouterClient: OpenRouterClient,
+    private val openRouterClient: AiClientRouter,
     private val settingsStore: SettingsStore
 ) {
     companion object {
