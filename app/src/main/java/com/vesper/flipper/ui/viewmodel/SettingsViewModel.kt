@@ -7,8 +7,11 @@ import com.vesper.flipper.data.AiProvider
 import com.vesper.flipper.data.ModelInfo
 import com.vesper.flipper.data.OpenRouterModelCatalog
 import com.vesper.flipper.data.SettingsStore
+import com.vesper.flipper.domain.model.AuditActionType
+import com.vesper.flipper.domain.model.AuditEntry
 import com.vesper.flipper.domain.model.CommandAction
 import com.vesper.flipper.domain.model.Permission
+import com.vesper.flipper.domain.service.AuditService
 import com.vesper.flipper.domain.service.PermissionService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -48,7 +51,8 @@ data class SettingsState(
 class SettingsViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val openRouterModelCatalog: OpenRouterModelCatalog,
-    private val permissionService: PermissionService
+    private val permissionService: PermissionService,
+    private val auditService: AuditService
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
@@ -304,6 +308,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsStore.setAutoApproveHigh(enabled)
             _state.update { it.copy(autoApproveHigh = enabled) }
+            auditService.log(AuditEntry(
+                actionType = AuditActionType.SETTINGS_CHANGED,
+                sessionId = "settings",
+                metadata = mapOf("setting" to "auto_approve_high", "value" to enabled.toString())
+            ))
         }
     }
 

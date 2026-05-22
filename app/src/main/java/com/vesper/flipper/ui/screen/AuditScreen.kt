@@ -644,6 +644,7 @@ private fun getAuditIcon(actionType: AuditActionType) = when (actionType) {
     AuditActionType.AI_REQUEST -> Icons.Default.Upload
     AuditActionType.AI_RESPONSE -> Icons.Default.Download
     AuditActionType.ERROR -> Icons.Default.Warning
+    AuditActionType.SETTINGS_CHANGED -> Icons.Default.Settings
 }
 
 private fun getAuditColor(actionType: AuditActionType) = when (actionType) {

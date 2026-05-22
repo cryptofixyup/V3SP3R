@@ -267,12 +267,12 @@ class GlassesBridgeClient @Inject constructor() {
         val trimmed = raw.trim()
         if (trimmed.isBlank()) return null
 
-        // Auto-convert https/http to wss/ws for WebSocket
+        // Auto-convert https/http to wss for WebSocket. Never downgrade to ws://.
         val converted = when {
             trimmed.startsWith("https://", ignoreCase = true) ->
                 "wss://" + trimmed.substring("https://".length)
             trimmed.startsWith("http://", ignoreCase = true) ->
-                "ws://" + trimmed.substring("http://".length)
+                "wss://" + trimmed.substring("http://".length)
             trimmed.startsWith("wss://", ignoreCase = true) -> trimmed
             trimmed.startsWith("ws://", ignoreCase = true) -> trimmed
             // No scheme — assume wss

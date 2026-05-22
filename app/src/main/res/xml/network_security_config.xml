@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext (ws://) for local development bridges.
-         Production bridges should always use wss:// (TLS). -->
-    <base-config cleartextTrafficPermitted="true">
+    <!-- Default: TLS only. No cleartext to external hosts. -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <!--
+      Permit plain ws:// only for loopback (localhost / 127.0.0.1) during
+      local development. LAN bridges (192.168.x.x etc.) must use wss://.
+      GlassesBridgeClient.sanitizeUrl() upgrades http:// to wss:// automatically.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
 </network-security-config>

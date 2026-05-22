@@ -35,6 +35,33 @@ fun SettingsScreen(
     val isRefreshingModels by viewModel.isRefreshingModels.collectAsState()
     var showApiKey by remember { mutableStateOf(false) }
     var showClaudeApiKey by remember { mutableStateOf(false) }
+    var showAutoApproveHighConfirm by remember { mutableStateOf(false) }
+
+    if (showAutoApproveHighConfirm) {
+        AlertDialog(
+            onDismissRequest = { showAutoApproveHighConfirm = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Enable High-Risk Auto-Approve?") },
+            text = {
+                Text(
+                    "Destructive actions — file deletions, moves, and overwrites — will execute " +
+                    "immediately without an approval dialog.\n\n" +
+                    "Only enable this if you fully trust every request the AI may generate."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showAutoApproveHighConfirm = false
+                        viewModel.setAutoApproveHigh(true)
+                    }
+                ) { Text("Enable Anyway", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAutoApproveHighConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -430,7 +457,10 @@ fun SettingsScreen(
                         title = "High risk",
                         subtitle = "Deletes, moves, overwrites, mass ops",
                         checked = state.autoApproveHigh,
-                        onCheckedChange = { viewModel.setAutoApproveHigh(it) }
+                        onCheckedChange = { enabled ->
+                            if (enabled) showAutoApproveHighConfirm = true
+                            else viewModel.setAutoApproveHigh(false)
+                        }
                     )
                     if (state.autoApproveHigh) {
                         Spacer(modifier = Modifier.height(4.dp))
