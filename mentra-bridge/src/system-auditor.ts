@@ -49,7 +49,9 @@ export class SystemAuditor {
     const hash = createHash('sha256').update(canonicalJson(validatedState)).digest('hex');
     const coolingOffExpiration = this.executionTime + this.coolingOffPeriodMs;
     const lockdownEnforced =
-      validatedState.circuitBreakerTripped && validatedState.activeEdgeBlocks > 0;
+      validatedState.circuitBreakerTripped &&
+      validatedState.activeEdgeBlocks > 0 &&
+      validatedState.vectorDBConnected;
 
     return AuditReportSchema.parse({
       state: validatedState,

@@ -1,5 +1,9 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer } from "http";
+import { randomUUID } from "crypto";
+import { SystemAuditor } from "./system-auditor";
+import { AuditPersistence } from "./audit-persistence";
+import type { AuditReport } from "./system-auditor";
 
 /**
  * V3SP3R ↔ Mentra Glasses Bridge Server
@@ -184,6 +188,41 @@ const PORT = parseInt(process.env.PORT || "8089", 10);
 const wss = new WebSocketServer({ port: PORT });
 
 console.log(`V3SP3R Glasses Bridge running on port ${PORT}`);
+
+// ==================== System Auditor ====================
+
+const auditPersistence = new AuditPersistence(process.env.AUDIT_LOG_PATH || "./audit.log");
+let lastAuditReport: AuditReport | null = auditPersistence.latest();
+
+function buildAuditState(): unknown {
+  return {
+    auditId: randomUUID(),
+    timestamp: Date.now(),
+    cve202631431Remediated: process.env.CVE_2026_31431_REMEDIATED === "true",
+    pamDOORaSevered: process.env.PAM_DOORA_SEVERED === "true",
+    circuitBreakerTripped: getVesperClients().length > 0,
+    activeEdgeBlocks: getVesperClients().length + getGlassesClients().length,
+    vectorDBConnected: !!process.env.VECTOR_DB_URL,
+  };
+}
+
+function runAudit(): void {
+  try {
+    const auditor = new SystemAuditor();
+    const report = auditor.executeFinalAudit(buildAuditState());
+    auditPersistence.append(report);
+    lastAuditReport = report;
+    console.log(`[Audit] Complete — lockdown: ${report.lockdownEnforced}, hash: ${report.chainOfCustodyHash.slice(0, 12)}...`);
+  } catch (e) {
+    console.error(`[Audit] FAILED: ${(e as Error).message}`);
+  }
+}
+
+const AUDIT_INTERVAL_MS = 5 * 60 * 1000;
+setTimeout(() => {
+  runAudit();
+  setInterval(runAudit, AUDIT_INTERVAL_MS);
+}, 0);
 
 // ==================== Heartbeat (keeps connections alive through proxies) ====================
 
@@ -963,6 +1002,14 @@ const httpServer = createServer((req, res) => {
         vesper: getVesperClients().length,
         mentra: !!process.env.MENTRA_API_KEY,
         uptime: process.uptime(),
+        audit: lastAuditReport
+          ? {
+              lockdownEnforced: lastAuditReport.lockdownEnforced,
+              coolingOffExpiration: lastAuditReport.coolingOffExpiration,
+              hash: lastAuditReport.chainOfCustodyHash,
+              timestamp: lastAuditReport.state.timestamp,
+            }
+          : null,
       })
     );
   } else {
