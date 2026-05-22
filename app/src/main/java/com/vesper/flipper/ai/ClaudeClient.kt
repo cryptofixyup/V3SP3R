@@ -769,9 +769,11 @@ class ClaudeClient @Inject constructor(
         private const val MAX_RETRIES = 2
         private const val INITIAL_RETRY_DELAY_MS = 700L
         private const val MAX_RETRY_DELAY_MS = 10_000L
-        private const val TOOL_CALL_MAX_TOKENS = 1024
-        private const val SIMPLE_MAX_TOKENS = 6144
-        private const val DEFAULT_MAX_TOKENS = 720
+        // With adaptive thinking enabled, thinking blocks count against max_tokens.
+        // These limits must be large enough to cover thinking + actual response content.
+        private const val TOOL_CALL_MAX_TOKENS = 16384 // thinking + tool call JSON + text
+        private const val SIMPLE_MAX_TOKENS = 6144     // no thinking, single-turn
+        private const val DEFAULT_MAX_TOKENS = 4096    // thinking + conversational response
 
         private const val VISION_SYSTEM_PROMPT =
             "You are a visual analysis assistant for a Flipper Zero companion app. " +
