@@ -217,7 +217,7 @@ class WebFileServer(
             parts.forEach((part, i) => {
                 path += '/' + part;
                 const p = path;
-                breadcrumb += '<a href="#" onclick="navigate(\'' + p + '\')">' + part + '</a>';
+                breadcrumb += '<a href="#" onclick="navigate(' + JSON.stringify(p) + ')">' + escapeHtml(part) + '</a>';
                 if (i < parts.length - 1) breadcrumb += ' / ';
             });
             document.getElementById('breadcrumb').innerHTML = breadcrumb || '/';
@@ -243,13 +243,14 @@ class WebFileServer(
                     const icon = file.isDir ? '📁' : getFileIcon(file.name);
                     const size = file.isDir ? '' : formatSize(file.size);
 
+                    const filePath = path + '/' + file.name;
                     item.innerHTML =
                         '<span class="icon">' + icon + '</span>' +
-                        '<span class="name">' + file.name + '</span>' +
+                        '<span class="name">' + escapeHtml(file.name) + '</span>' +
                         '<span class="size">' + size + '</span>' +
                         '<span class="actions">' +
-                            (file.isDir ? '' : '<button onclick="downloadFile(\'' + path + '/' + file.name + '\')">⬇️</button>') +
-                            '<button onclick="deleteItem(\'' + path + '/' + file.name + '\', ' + file.isDir + ')">🗑️</button>' +
+                            (file.isDir ? '' : '<button onclick="downloadFile(' + JSON.stringify(filePath) + ')">⬇️</button>') +
+                            '<button onclick="deleteItem(' + JSON.stringify(filePath) + ', ' + file.isDir + ')">🗑️</button>' +
                         '</span>';
 
                     if (file.isDir) {
@@ -308,9 +309,9 @@ class WebFileServer(
                 }
 
                 document.getElementById('modal-body').innerHTML =
-                    '<h3>' + path.split('/').pop() + '</h3>' +
+                    '<h3>' + escapeHtml(path.split('/').pop()) + '</h3>' +
                     '<pre>' + escapeHtml(data.content) + '</pre>' +
-                    '<button onclick="downloadFile(\'' + path + '\')">Download</button>';
+                    '<button onclick="downloadFile(' + JSON.stringify(path) + ')">Download</button>';
                 document.getElementById('modal').classList.remove('hidden');
             } catch (e) {
                 alert('Error reading file: ' + e.message);
@@ -318,7 +319,9 @@ class WebFileServer(
         }
 
         function escapeHtml(str) {
-            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return String(str)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         function downloadFile(path) {
@@ -490,7 +493,7 @@ main { padding: 16px; }
 
     private suspend fun handleDownloadApi(path: String, outputStream: OutputStream) {
         val flipperPath = extractQueryParam(path, "path") ?: return
-        val filename = flipperPath.substringAfterLast("/")
+        val filename = flipperPath.substringAfterLast("/").replace(Regex("[\r\n\"\\\\]"), "_")
 
         try {
             val result = flipperFileSystem.readFile(flipperPath)
